@@ -94,36 +94,19 @@ sub vcl_recv {
   }
 }
 
+# Code determining what to do when serving items from the backend servers.
 sub vcl_fetch {
-  # These status codes should always pass through and never cache.
-  if (beresp.status == 404 || beresp.status == 503 || beresp.status == 500) {
-    return(pass);
+  # Don't allow static files to set cookies.
+  if (req.url ~ "(?i)\.(png|gif|jpeg|jpg|ico|swf|css|js|html|htm)(\?[a-z0-9]+)?$") {
+    # beresp == Back-end response from the web server.
+    unset beresp.http.set-cookie;
   }
 
   # Allow items to be stale if needed.
   set beresp.grace = 6h;
-
-  # Static files are cached for an hour
-  if (req.url ~ "(?i)\.(png|gif|jpeg|jpg|ico|swf|css|js|html|htm)(\?[a-z0-9]+)?$") {
-    remove req.http.Accept-Encoding;
-    unset req.http.set-cookie;
-  }
-
-  # marker for vcl_deliver to reset Age:
-  set beresp.http.magicmarker = "1";
-
-  return(deliver);
 }
 
 sub vcl_deliver {
-  # Remove the magic marker
-  if (resp.http.magicmarker) {
-    unset resp.http.magicmarker;
-
-    # By definition we have a fresh object
-    set resp.http.age = "0";
-  }
-
   # Add cache hit data
   if (obj.hits > 0) {
     # If hit add hit count
