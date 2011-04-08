@@ -48,6 +48,26 @@ sub vcl_recv {
   // Remove has_js and Google Analytics __* cookies.
   set req.http.Cookie = regsuball(req.http.Cookie, "(^|;\s*)(__[a-z]+|has_js)=[^;]*", "");
 
+  # Handle compression correctly. Different browsers send different
+  # "Accept-Encoding" headers, even though they mostly all support the same
+  # compression mechanisms. By consolidating these compression headers into
+  # a consistent format, we can reduce the size of the cache and get more hits.
+  # @see: http:// varnish.projects.linpro.no/wiki/FAQ/Compression
+  if (req.http.Accept-Encoding) {
+    if (req.http.Accept-Encoding ~ "gzip") {
+      # If the browser supports it, we'll use gzip.
+      set req.http.Accept-Encoding = "gzip";
+    }
+    else if (req.http.Accept-Encoding ~ "deflate") {
+      # Next, try deflate if it is supported.
+      set req.http.Accept-Encoding = "deflate";
+    }
+    else {
+      # Unknown algorithm. Remove it and send unencoded.
+      unset req.http.Accept-Encoding;
+    }
+  }
+
   # Remove all cookies that Drupal doesn't need to know about. ANY remaining
   # cookie will cause the request to pass-through to Apache. For the most part
   # we always set the NO_CACHE cookie after any POST request, disabling the
@@ -70,26 +90,6 @@ sub vcl_recv {
       # If there are any cookies left (a session or NO_CACHE cookie), do not
       # cache the page. Pass it on to Apache directly.
       return (pass);
-    }
-  }
-
-  # Handle compression correctly. Different browsers send different
-  # "Accept-Encoding" headers, even though they mostly all support the same
-  # compression mechanisms. By consolidating these compression headers into
-  # a consistent format, we can reduce the size of the cache and get more hits.
-  # @see: http:// varnish.projects.linpro.no/wiki/FAQ/Compression
-  if (req.http.Accept-Encoding) {
-    if (req.http.Accept-Encoding ~ "gzip") {
-      # If the browser supports it, we'll use gzip.
-      set req.http.Accept-Encoding = "gzip";
-    }
-    else if (req.http.Accept-Encoding ~ "deflate") {
-      # Next, try deflate if it is supported.
-      set req.http.Accept-Encoding = "deflate";
-    }
-    else {
-      # Unknown algorithm. Remove it and send unencoded.
-      unset req.http.Accept-Encoding;
     }
   }
 }
