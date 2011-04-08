@@ -1,20 +1,38 @@
-# This is a basic VCL configuration file for varnish.  See the vcl(7)
-# man page for details on VCL syntax and semantics.
-# 
-# Default backend definition.  Set this to point to your content
-# server.
- 
-backend default {
+# Reveal ITs Varnish configuration.
+#
+# This is primarily minded on Drupal sites.
+# Much of the inspiration commes from Nate Haug’s blog post:
+# http://www.lullabot.com/articles/varnish-multiple-web-servers-drupal
+
+backend nginx {
      .host = "127.0.0.1";
      .port = "8080";
 }
- 
-sub vcl_recv {
-  # Allow a grace period for offering "stale" data in case backend lags
-  set req.grace = 5m;
 
-  remove req.http.X-Forwarded-For;
-  set req.http.X-Forwarded-For = client.ip;
+sub vcl_recv {
+  # Default backend is nginx, plain and simple.
+  set req.backend = nginx;
+
+  # Allow the backend to serve up stale content if it is responding slowly.
+  set req.grace = 6h;
+
+  # Use anonymous, cached pages if all backends are down.
+  if (!req.backend.healthy) {
+    unset req.http.Cookie;
+  }
+
+  # Do not cache these paths.
+  if (req.url ~ "^/status\.php$" ||
+      req.url ~ "^/update\.php$" ||
+      req.url ~ "^/install\.php$" ||
+      req.url ~ "^/admin/build/features" ) {
+      return (pass);
+  }
+
+  # Pipe these paths directly to Apache for streaming.
+  if (req.url ~ "^/admin/content/backup_migrate/export") {
+    return (pipe);
+  }
 
   # Deal with GET and HEAD  requests only, everything else gets through
   if (req.request != "GET" &&
@@ -22,66 +40,71 @@ sub vcl_recv {
     return (pass);
   }
 
-  # Normalise Accept-Encoding headers.
-  if (req.http.Accept-Encoding) {
-    if (req.url ~ "\.(jpg|png|gif|gz|tgz|bz2|tbz|mp3|ogg)$") {
-      # No point in compressing these
-      remove req.http.Accept-Encoding;
-    } elsif (req.http.Accept-Encoding ~ "gzip") {
-      set req.http.Accept-Encoding = "gzip";
-    } elsif (req.http.Accept-Encoding ~ "deflate") {
-      set req.http.Accept-Encoding = "deflate";
-    } else {
-      # unkown algorithm
-      remove req.http.Accept-Encoding;
-    }
-  }
-  if (req.url ~ "\.(css|jpg|gif|jpeg|png|html|js|ico)") {
-    unset req.http.cookie;
-    set req.url = regsub(req.url, "\?.*$", "");
-  }
-
-  // js
-  if (req.url ~ "\.js$") {
-    unset req.http.cookie;
-    return(lookup);
-  }
-  // images
-  if (req.url ~ "\.(gif|jpg|jpeg|bmp|png|tiff|tif|ico|img|tga|wmf)$") {
-    unset req.http.cookie;
-    return(lookup);
+  # Always cache the following file types for all users.
+  if (req.url ~ "(?i)\.(png|gif|jpeg|jpg|ico|swf|css|js|html|htm)(\?[a-z0-9]+)?$") {
+    unset req.http.Cookie;
   }
 
   // Remove has_js and Google Analytics __* cookies.
   set req.http.Cookie = regsuball(req.http.Cookie, "(^|;\s*)(__[a-z]+|has_js)=[^;]*", "");
 
-  // Remove a ";" prefix, if present.
-  set req.http.Cookie = regsub(req.http.Cookie, "^;\s*", "");
+  # Remove all cookies that Drupal doesn't need to know about. ANY remaining
+  # cookie will cause the request to pass-through to Apache. For the most part
+  # we always set the NO_CACHE cookie after any POST request, disabling the
+  # Varnish cache temporarily. The session cookie allows all authenticated users
+  # to pass through as long as they're logged in.
+  if (req.http.Cookie) {
+    set req.http.Cookie = ";" req.http.Cookie;
+    set req.http.Cookie = regsuball(req.http.Cookie, "; +", ";");
+    set req.http.Cookie = regsuball(req.http.Cookie, ";(SESS[a-z0-9]+|NO_CACHE)=", "; \1=");
+    set req.http.Cookie = regsuball(req.http.Cookie, ";[^ ][^;]*", "");
+    set req.http.Cookie = regsuball(req.http.Cookie, "^[; ]+|[; ]+$", "");
 
-  // Remove empty cookies.
-  if (req.http.Cookie ~ "^\s*$") {
-    unset req.http.Cookie;
+    if (req.http.Cookie == "") {
+      # If there are no remaining cookies, remove the cookie header. If there
+      # aren't any cookie headers, Varnish's default behavior will be to cache
+      # the page.
+      unset req.http.Cookie;
+    }
+    else {
+      # If there are any cookies left (a session or NO_CACHE cookie), do not
+      # cache the page. Pass it on to Apache directly.
+      return (pass);
+    }
   }
 
-  if (req.http.Cookie ~ "(VARNISH|DRUPAL_UID|NO_CACHE)") {
-    return(pass);
+  # Handle compression correctly. Different browsers send different
+  # "Accept-Encoding" headers, even though they mostly all support the same
+  # compression mechanisms. By consolidating these compression headers into
+  # a consistent format, we can reduce the size of the cache and get more hits.
+  # @see: http:// varnish.projects.linpro.no/wiki/FAQ/Compression
+  if (req.http.Accept-Encoding) {
+    if (req.http.Accept-Encoding ~ "gzip") {
+      # If the browser supports it, we'll use gzip.
+      set req.http.Accept-Encoding = "gzip";
+    }
+    else if (req.http.Accept-Encoding ~ "deflate") {
+      # Next, try deflate if it is supported.
+      set req.http.Accept-Encoding = "deflate";
+    }
+    else {
+      # Unknown algorithm. Remove it and send unencoded.
+      unset req.http.Accept-Encoding;
+    }
   }
 }
 
-sub vcl_fetch {  
+sub vcl_fetch {
   # These status codes should always pass through and never cache.
   if (beresp.status == 404 || beresp.status == 503 || beresp.status == 500) {
-    set beresp.http.X-Cacheable = "NO: beresp.status";
-    set beresp.http.X-Cacheable-status = beresp.status;
     return(pass);
   }
 
-  # Grace to allow varnish to serve content if backend is lagged
-  set beresp.grace = 5m;
+  # Allow items to be stale if needed.
+  set beresp.grace = 6h;
 
   # Static files are cached for an hour
-  if (req.url ~ "\.(gif|jpg|jpeg|bmp|png|tiff|tif|ico|img|tga|wmf|js|css|bz2|tgz|gz|mp3|ogg|swf)") {
-    set beresp.ttl = 60m;
+  if (req.url ~ "(?i)\.(png|gif|jpeg|jpg|ico|swf|css|js|html|htm)(\?[a-z0-9]+)?$") {
     remove req.http.Accept-Encoding;
     unset req.http.set-cookie;
   }
