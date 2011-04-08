@@ -106,6 +106,7 @@ sub vcl_fetch {
   set beresp.grace = 6h;
 }
 
+# When cached data is delivered to the client, set a bit of cache info.
 sub vcl_deliver {
   # Add cache hit data
   if (obj.hits > 0) {
@@ -118,6 +119,7 @@ sub vcl_deliver {
 }
 
 sub vcl_error {
+  # Retry up to four times if the web site is temporarily unavailable.
   if (obj.status == 503 && req.restarts < 5) {
     set obj.http.X-Restarts = req.restarts;
     restart;
