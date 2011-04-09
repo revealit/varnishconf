@@ -21,6 +21,7 @@ sub vcl_recv {
       req.request != "HEAD") {
     return (pass);
   }
+
   # Normalise Accept-Encoding headers.
   if (req.http.Accept-Encoding) {
     if (req.url ~ "\.(jpg|png|gif|gz|tgz|bz2|tbz|mp3|ogg)$") {
@@ -52,8 +53,7 @@ sub vcl_recv {
   }
 
   // Remove has_js and Google Analytics __* cookies.
-  set req.http.Cookie = regsuball(req.http.Cookie, "(^|;\s*)(__[a-z]+|has_js)=[^
-;]*", "");
+  set req.http.Cookie = regsuball(req.http.Cookie, "(^|;\s*)(__[a-z]+|has_js)=[^;]*", "");
 
   // Remove a ";" prefix, if present.
   set req.http.Cookie = regsub(req.http.Cookie, "^;\s*", "");
