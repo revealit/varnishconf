@@ -50,9 +50,6 @@ sub vcl_recv {
     unset req.http.Cookie;
   }
 
-  // Remove has_js and Google Analytics __* cookies.
-  set req.http.Cookie = regsuball(req.http.Cookie, "(^|;\s*)(__[a-z]+|has_js)=[^;]*", "");
-
   # Handle compression correctly. Different browsers send different
   # "Accept-Encoding" headers, even though they mostly all support the same
   # compression mechanisms. By consolidating these compression headers into
@@ -80,9 +77,17 @@ sub vcl_recv {
   # to pass through as long as they're logged in.
   if (req.http.Cookie) {
     set req.http.Cookie = ";" req.http.Cookie;
+
+    # Remove spaces after the semicolons separating cookies.
     set req.http.Cookie = regsuball(req.http.Cookie, "; +", ";");
-    set req.http.Cookie = regsuball(req.http.Cookie, ";(SESS[a-z0-9]+|NO_CACHE)=", "; \1=");
+
+    # Put space folloing semicolon back for whitelisted cookies.
+    set req.http.Cookie = regsuball(req.http.Cookie, ";(SESS[0-9a-f]+|NO_CACHE)=", "; \1=");
+
+    # Remove cookies not preceeded by a space.
     set req.http.Cookie = regsuball(req.http.Cookie, ";[^ ][^;]*", "");
+
+    # Strip semicolons and spaces from the start and the end of the cookie string.
     set req.http.Cookie = regsuball(req.http.Cookie, "^[; ]+|[; ]+$", "");
 
     if (req.http.Cookie == "") {
