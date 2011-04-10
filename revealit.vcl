@@ -21,6 +21,11 @@ sub vcl_recv {
     unset req.http.Cookie;
   }
 
+  # Set the X-Forwarded-For header so the backend can see the original
+  # IP address.
+  remove req.http.X-Forwarded-For;
+  set req.http.X-Forwarded-For = client.ip;
+
   # Do not cache these paths.
   if (req.url ~ "^/status\.php$" ||
       req.url ~ "^/update\.php$" ||
