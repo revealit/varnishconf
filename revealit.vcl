@@ -82,7 +82,7 @@ sub vcl_recv {
     set req.http.Cookie = regsuball(req.http.Cookie, "; +", ";");
 
     # Put space folloing semicolon back for whitelisted cookies.
-    set req.http.Cookie = regsuball(req.http.Cookie, ";(SESS[0-9a-f]+|NO_CACHE)=", "; \1=");
+    set req.http.Cookie = regsuball(req.http.Cookie, ";(SESS[0-9a-f]+|NO_CACHE|csrftoken|sessionid|[a-z_]+session)=", "; \1=");
 
     # Remove cookies not preceeded by a space.
     set req.http.Cookie = regsuball(req.http.Cookie, ";[^ ][^;]*", "");
