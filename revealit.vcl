@@ -28,8 +28,9 @@ sub vcl_recv {
 
   # Do not cache these paths.
   if (req.url ~ "^/status\.php$" ||
-      req.url ~ "^/update\.php$" ||
-      req.url ~ "^/install\.php$" ||
+      req.url ~ "^/update\.php" ||
+      req.url ~ "^/install\.php" ||
+      req.url ~ "^/piwik\.php" ||
       req.url ~ "^/admin/build/features" ) {
       return (pass);
   }
