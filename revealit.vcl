@@ -77,7 +77,8 @@ sub vcl_recv {
   # Varnish cache temporarily. The session cookie allows all authenticated users
   # to pass through as long as they're logged in.
   if (req.http.Cookie) {
-    set req.http.Cookie = ";" req.http.Cookie;
+    # Prepend semicolon for the regexes below to work.
+    set req.http.Cookie = ";" + req.http.Cookie;
 
     # Remove spaces after the semicolons separating cookies.
     set req.http.Cookie = regsuball(req.http.Cookie, "; +", ";");
@@ -133,13 +134,13 @@ sub vcl_error {
   # Retry up to four times if the web site is temporarily unavailable.
   if (obj.status == 503 && req.restarts < 5) {
     set obj.http.X-Restarts = req.restarts;
-    restart;
+    return(restart);
   }
 }
 
 sub vcl_hit {
   # Allow users force refresh
-  if (!obj.cacheable) {
+  if (!obj.ttl > 0s) {
     return(pass);
   }
 }
