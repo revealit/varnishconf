@@ -4,15 +4,12 @@
 # Much of the inspiration commes from Nate Haug’s blog post:
 # http://www.lullabot.com/articles/varnish-multiple-web-servers-drupal
 
-backend nginx {
-     .host = "127.0.0.1";
-     .port = "8080";
+backend default {
+  .host = "127.0.0.1";
+  .port = "8080";
 }
 
 sub vcl_recv {
-  # Default backend is nginx, plain and simple.
-  set req.backend = nginx;
-
   # Allow the backend to serve up stale content if it is responding slowly.
   set req.grace = 6h;
 
