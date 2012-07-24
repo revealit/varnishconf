@@ -4,6 +4,11 @@
 # Much of the inspiration commes from Nate Haug’s blog post:
 # http://www.lullabot.com/articles/varnish-multiple-web-servers-drupal
 
+# List of upstream proxies we trust to set X-Forwarded-For correctly.
+acl upstream_proxy {
+  "127.0.0.1";
+}
+
 backend default {
   .host = "127.0.0.1";
   .port = "8080";
@@ -19,9 +24,12 @@ sub vcl_recv {
   }
 
   # Set the X-Forwarded-For header so the backend can see the original
-  # IP address.
-  remove req.http.X-Forwarded-For;
-  set req.http.X-Forwarded-For = client.ip;
+  # IP address. If one is already set by an upstream proxy, we'll just re-use that.
+  if (client.ip ~ upstream_proxy && req.http.X-Forwarded-For) {
+    set req.http.X-Forwarded-For = req.http.X-Forwarded-For;
+  } else {
+    set req.http.X-Forwarded-For = regsub(client.ip, ":.*", "");
+  }
 
   # Do not cache these paths.
   if (req.url ~ "^/status\.php$" ||
@@ -97,7 +105,7 @@ sub vcl_recv {
     }
     else {
       # If there are any cookies left (a session or NO_CACHE cookie), do not
-      # cache the page. Pass it on to Apache directly.
+      # cache the page. Pass it on to the backend directly.
       return (pass);
     }
   }
@@ -142,3 +150,22 @@ sub vcl_hit {
   }
 }
 
+sub vcl_hash {
+  # URL and hostname/IP are the default components of the vcl_hash
+  # implementation. We add more below.
+  hash_data(req.url);
+  if (req.http.host) {
+      hash_data(req.http.host);
+  } else {
+      hash_data(server.ip);
+  }
+
+  # Include the X-Forward-Proto header, since we want to treat HTTPS
+  # requests differently, and make sure this header is always passed
+  # properly to the backend server.
+  if (req.http.X-Forwarded-Proto) {
+    hash_data(req.http.X-Forwarded-Proto);
+  }
+
+  return (hash);
+}
